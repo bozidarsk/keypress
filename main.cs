@@ -56,8 +56,6 @@ public static class Program
 			}
 		}
 
-		foreach (int key in keycodes) { Console.WriteLine($"{(Input.KeyCode)key}:{key}"); }
-
 		IntPtr e = Marshal.AllocCoTaskMem(24); // sizeof(struct input_event) /* #include <linux/input.h> */
 		int fd = open(Marshal.StringToCoTaskMemUTF8(Config.Device), 1); // O_WRONLY
 
