@@ -4,81 +4,23 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 
-/*
-
-struct input_event 
-{
-#if (__BITS_PER_LONG != 32 || !defined(__USE_TIME_BITS64)) && !defined(__KERNEL__)
-	struct timeval time;
-#else
-	__kernel_ulong_t __sec;
-
-	#if defined(__sparc__) && defined(__arch64__)
-		unsigned int __usec;
-		unsigned int __pad;
-	#else
-		__kernel_ulong_t __usec;
-	#endif
-#endif
-
-	__u16 type;
-	__u16 code;
-	__s32 value;
-};
-
-struct evemu_device *evemu_new(const char *name);
-void evemu_delete(struct evemu_device *dev);
-unsigned int evemu_get_version(const struct evemu_device *dev);
-const char *evemu_get_name(const struct evemu_device *dev);
-void evemu_set_name(struct evemu_device *dev, const char *name);
-unsigned int evemu_get_id_bustype(const struct evemu_device *dev);
-void evemu_set_id_bustype(struct evemu_device *dev, unsigned int bustype);
-unsigned int evemu_get_id_vendor(const struct evemu_device *dev);
-void evemu_set_id_vendor(struct evemu_device *dev, unsigned int vendor);
-unsigned int evemu_get_id_product(const struct evemu_device *dev);
-void evemu_set_id_product(struct evemu_device *dev, unsigned int product);
-unsigned int evemu_get_id_version(const struct evemu_device *dev);
-void evemu_set_id_version(struct evemu_device *dev, unsigned int version);
-int evemu_get_abs_minimum(const struct evemu_device *dev, int code);
-void evemu_set_abs_minimum(struct evemu_device *dev, int code, int min);
-int evemu_get_abs_maximum(const struct evemu_device *dev, int code);
-int evemu_get_abs_current_value(const struct evemu_device *dev, int code);
-
-void evemu_set_abs_maximum(struct evemu_device *dev, int code, int max);
-int evemu_get_abs_fuzz(const struct evemu_device *dev, int code);
-void evemu_set_abs_fuzz(struct evemu_device *dev, int code, int fuzz);
-int evemu_get_abs_flat(const struct evemu_device *dev, int code);
-void evemu_set_abs_flat(struct evemu_device *dev, int code, int flat);
-int evemu_get_abs_resolution(const struct evemu_device *dev, int code);
-void evemu_set_abs_resolution(struct evemu_device *dev, int code, int res);
-int evemu_has_prop(const struct evemu_device *dev, int code);
-int evemu_has_event(const struct evemu_device *dev, int type, int code);
-int evemu_has_bit(const struct evemu_device *dev, int type);
-int evemu_extract(struct evemu_device *dev, int fd);
-int evemu_write(const struct evemu_device *dev, FILE *fp);
-int evemu_read(struct evemu_device *dev, FILE *fp);
-int evemu_write_event(FILE *fp, const struct input_event *ev);
-int evemu_create_event(struct input_event *ev, int type, int code, int value);
-int evemu_read_event(FILE *fp, struct input_event *ev);
-int evemu_read_event_realtime(FILE *fp, struct input_event *ev, struct timeval *evtime);
-int evemu_record(FILE *fp, int fd, int ms);
-
-int evemu_play_one(int fd, const struct input_event *ev);
-int evemu_play(FILE *fp, int fd);
-int evemu_create(struct evemu_device *dev, int fd);
-int evemu_create_managed(struct evemu_device *dev);
-const char *evemu_get_devnode(struct evemu_device *dev);
-void evemu_destroy(struct evemu_device *dev);
-
-*/
-
 public static class Program 
 {
+	[DllImport("evemu")] private static extern int evemu_create_event(IntPtr inputEvent, int type, int code, int value);
+	[DllImport("evemu")] private static extern int evemu_play_one(int fd, IntPtr inputEvent);
+	[DllImport("evemu")] private static extern int open(IntPtr file, int flags);
+	[DllImport("evemu")] private static extern void close(int fd);
+
 	public static uint HexToUInt(string x) 
 	{
 		uint result = 0;
 		string chars = "0123456789abcdef";
-		for (int i = 0; i < x.Length; i++) { result += (uint)chars.IndexOf(x[i]); result <<= 4; }
+		for (int i = 0; i < x.Length; i++) 
+		{
+			result += (uint)chars.IndexOf(x[i]);
+			if (i < x.Length - 1) { result <<= 4; }
+		}
+
 		return result;
 	}
 
@@ -86,30 +28,56 @@ public static class Program
 	{
 		if (args.Length == 0 || (args.Length == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help"))) 
 		{
-			Console.WriteLine("Usage:\n\tkeypress <key0> [key1] [key...]");
+			Console.WriteLine("Usage:\n\tkeypress <key0> [key1] [key...] [options]");
+			Console.WriteLine("\nOptions:");
+			Console.WriteLine("\t-d, --device <dir>  Directory which contains configuration and style files.");
 			return 0;
 		}
 
-		uint[] keycodes = new uint[args.Length];
+		Config.Initialize(ref args);
+
+		int[] keycodes = new int[args.Length];
 		for (int i = 0; i < keycodes.Length; i++) 
 		{
-			if (uint.TryParse(args[i], out uint key)) 
+			if (int.TryParse(args[i], out int key)) 
 			{
 				keycodes[i] = key;
 				continue;
 			}
 			else if (Enum.TryParse<Input.KeyCode>(args[i], true, out Input.KeyCode keycode)) 
 			{
-				keycodes[i] = (uint)keycode;
+				keycodes[i] = (int)keycode;
 				continue;
 			}
 			else if (args[i].StartsWith("0x")) 
 			{
-				keycodes[i] = HexToUInt(args[i]);
+				keycodes[i] = (int)HexToUInt(args[i].Substring(2, args[i].Length - 2));
+				continue;
 			}
 		}
 
-		foreach (uint key in keycodes) { Console.WriteLine(key); }
+		foreach (int key in keycodes) { Console.WriteLine($"{(Input.KeyCode)key}:{key}"); }
+
+		IntPtr e = Marshal.AllocCoTaskMem(24); // sizeof(struct input_event) /* #include <linux/input.h> */
+		int fd = open(Marshal.StringToCoTaskMemUTF8(Config.Device), 1); // O_WRONLY
+
+		for (int i = 0; i < keycodes.Length; i++) 
+		{
+			evemu_create_event(e, (int)Input.EV.KEY, keycodes[i], 1);
+			evemu_play_one(fd, e);
+			evemu_create_event(e, (int)Input.EV.SYN, (int)Input.SYN.REPORT, 0);
+			evemu_play_one(fd, e);
+		}
+
+		for (int i = keycodes.Length - 1; i >= 0; i--) 
+		{
+			evemu_create_event(e, (int)Input.EV.KEY, keycodes[i], 0);
+			evemu_play_one(fd, e);
+			evemu_create_event(e, (int)Input.EV.SYN, (int)Input.SYN.REPORT, 0);
+			evemu_play_one(fd, e);
+		}
+
+		close(fd);
 
 		return 0;
 	}

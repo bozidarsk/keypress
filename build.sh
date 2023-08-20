@@ -1,7 +1,7 @@
 # build: mono
 # runtime: mono, evemu
 
-mcs '-recurse:*.cs' -out:keypress
+mcs '-recurse:*.cs' -define:NO_FILES,NO_CSS -out:keypress
 if [[ $? -eq 0 ]]; then
 	chmod 755 ./keypress
 	sudo chown root:root ./keypress
